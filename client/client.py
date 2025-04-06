@@ -5,6 +5,8 @@ import json
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from openai import OpenAI
+from mcp.client.sse import sse_client
+
 
 class MCPClient:
     def __init__(self):
@@ -12,14 +14,35 @@ class MCPClient:
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
         self.llmclient = OpenAI(
-            api_key="sk-5c2ba0b53ccb4fbb8388c9f7158b0232",
-            base_url="https://api.deepseek.com",
+            # api_key="sk-5c2ba0b53ccb4fbb8388c9f7158b0232",
+            # base_url="https://api.deepseek.com",
+            base_url="https://api.agicto.cn/v1",
+            api_key="sk-BG7BGtHCOFyrx7btnF3gh8ylBeUzVa1AgAewRzcYKYc6QPYS",
             timeout=10,
             max_retries=3
         )
 
-    # methods will go here
+    # 使用sse连接
+    async def connect_to_sse_server(self, server_url: str):
+        """Connect to an MCP server running with SSE transport"""
+        # Store the context managers so they stay alive
+        self._streams_context = sse_client(url=server_url)
+        streams = await self._streams_context.__aenter__()
 
+        self._session_context = ClientSession(*streams)
+        self.session: ClientSession = await self._session_context.__aenter__()
+
+        # Initialize
+        await self.session.initialize()
+
+        # List available tools to verify connection
+        print("Initialized SSE client...")
+        print("Listing tools...")
+        response = await self.session.list_tools()
+        tools = response.tools
+        print("\nConnected to server with tools:", [tool.name for tool in tools])
+
+    # 使用stdio连接
     async def connect_to_server(self, server_script_path: str):
 
         is_python = server_script_path.endswith('.py')
@@ -64,11 +87,11 @@ class MCPClient:
             }
         } for tool in response.tools]
 
-        print("available_tools", json.dumps(available_tools, indent=2))
+        # print("available_tools", json.dumps(available_tools, indent=2))
         print("call openai")
         response = self.llmclient.chat.completions.create(
             messages=messages,
-            model="deepseek-chat",
+            model="gpt-4o-mini",
             tools=available_tools,
             tool_choice="auto"
         )
@@ -102,7 +125,7 @@ class MCPClient:
                 print("messages", json.dumps(messages, indent=2))
                 # Get next response from OpenAI
                 response = self.llmclient.chat.completions.create(
-                    model="deepseek-chat",
+                    model="gpt-4o-mini",
                     messages=messages,
                 )
                 print("openai response", response.to_json())
@@ -136,12 +159,12 @@ class MCPClient:
 
 async def main():
     if len(sys.argv) < 2:
-        print("Usage: python client.py <path_to_server_script>")
+        print("Usage: uv run client.py <URL of SSE MCP server (i.e. http://localhost:8080/sse)>")
         sys.exit(1)
 
     client = MCPClient()
     try:
-        await client.connect_to_server(sys.argv[1])
+        await client.connect_to_sse_server(server_url=sys.argv[1])
         await client.chat_loop()
     finally:
         await client.cleanup()
